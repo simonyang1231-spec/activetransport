@@ -1,0 +1,1087 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>The Gradient: Cellular Horror</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;600;700&family=Orbitron:wght@500;700;900&display=swap');
+
+        * {
+            box-sizing: border-box;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #030206;
+            color: #e2e8f0;
+            font-family: 'Fira Code', monospace;
+            overflow: hidden;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+        }
+
+        .font-orbitron {
+            font-family: 'Orbitron', sans-serif;
+        }
+
+        #gameViewport {
+            position: relative;
+            width: 1000px;
+            height: 700px;
+            max-width: 100vw;
+            max-height: 100vh;
+            box-shadow: 0 0 60px rgba(180, 0, 0, 0.45), 0 0 100px rgba(0, 0, 0, 0.9);
+            background-color: #000;
+            border: 2px solid #3f0e14;
+            border-radius: 8px;
+            overflow: hidden;
+            cursor: crosshair;
+        }
+
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+
+        .hud-overlay {
+            position: absolute;
+            pointer-events: none;
+            z-index: 10;
+        }
+
+        .stamina-glow {
+            box-shadow: 0 0 12px rgba(255, 170, 0, 0.6);
+        }
+
+        .pulse-beacon {
+            animation: beaconPulse 1.2s infinite ease-in-out;
+        }
+
+        @keyframes beaconPulse {
+            0% { opacity: 0.3; transform: scale(0.95); }
+            50% { opacity: 1; transform: scale(1.1); }
+            100% { opacity: 0.3; transform: scale(0.95); }
+        }
+
+        /* Glassmorphism modal UI */
+        .glass-panel {
+            background: rgba(8, 6, 14, 0.92);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(220, 38, 38, 0.3);
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.85);
+        }
+
+        /* Custom Scrollbar for Modal Text */
+        .custom-scroll::-webkit-scrollbar {
+            width: 6px;
+        }
+        .custom-scroll::-webkit-scrollbar-track {
+            background: rgba(15, 23, 42, 0.6);
+        }
+        .custom-scroll::-webkit-scrollbar-thumb {
+            background: #ef4444;
+            border-radius: 3px;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="gameViewport" class="relative select-none">
+        <!-- Main 3D Raycasting Canvas -->
+        <canvas id="gameCanvas" width="1000" height="700"></canvas>
+
+        <!-- Jumpscare Canvas Overlay -->
+        <canvas id="jumpscareCanvas" width="1000" height="700" class="absolute inset-0 hidden pointer-events-none z-50"></canvas>
+
+        <!-- Top HUD Panel -->
+        <div class="hud-overlay top-4 left-6 right-6 flex justify-between items-start text-sm">
+            <!-- Left Stats -->
+            <div class="bg-slate-950/80 backdrop-blur-md border border-red-950/60 p-3 rounded-lg flex flex-col gap-1 shadow-lg">
+                <div class="text-xs text-red-400/80 uppercase tracking-widest font-orbitron">Cellular Location</div>
+                <div class="text-lg font-bold text-red-100 font-orbitron flex items-center gap-2">
+                    <span class="inline-block w-2.5 h-2.5 rounded-full bg-red-500 animate-pulse"></span>
+                    SECTOR <span id="levelDisplay" class="text-amber-400">1</span>: GUT LUMEN
+                </div>
+                <div class="text-xs text-slate-400 mt-1">
+                    Gradient Pull: <span id="gradientDisplay" class="text-red-400 font-bold">Downwards (0.008)</span>
+                </div>
+            </div>
+
+            <!-- Middle Mission ATP Status -->
+            <div class="bg-slate-950/80 backdrop-blur-md border border-amber-500/40 px-5 py-3 rounded-lg flex flex-col items-center shadow-lg">
+                <div class="text-xs text-amber-400/90 font-orbitron uppercase tracking-wider">ATP Energy Harvest</div>
+                <div id="atpDisplay" class="text-2xl font-black text-amber-400 font-orbitron tracking-wider">0 / 3</div>
+            </div>
+
+            <!-- Right Radar Container (Mini Map) -->
+            <div class="bg-slate-950/90 border border-slate-800 p-1.5 rounded-xl shadow-2xl relative">
+                <div class="text-[10px] text-center text-slate-400 mb-1 font-orbitron uppercase">MEMBRANE RADAR</div>
+                <canvas id="minimapCanvas" width="140" height="140" class="rounded-lg border border-slate-800/80"></canvas>
+            </div>
+        </div>
+
+        <!-- Bottom Controls & Stamina HUD -->
+        <div class="hud-overlay bottom-4 left-6 right-6 flex flex-col gap-2 pointer-events-none">
+            <!-- Controls Quick Guide -->
+            <div id="controlsGuide" class="text-[11px] text-slate-400 bg-slate-950/70 border border-slate-800/60 px-3 py-1.5 rounded self-start backdrop-blur-sm">
+                [W,A,S,D] Move | [SHIFT] Sprint | [Trackpad Swipe / Mouse Drag / PointerLock] Look Around
+            </div>
+
+            <div class="flex justify-between items-end">
+                <!-- Stamina Bar -->
+                <div class="w-64 bg-slate-950/80 border border-red-900/50 p-2 rounded-lg backdrop-blur-md">
+                    <div class="flex justify-between text-[11px] font-orbitron text-amber-400 mb-1">
+                        <span>STAMINA (ATP)</span>
+                        <span id="staminaPercent">100%</span>
+                    </div>
+                    <div class="w-full h-2.5 bg-slate-900 rounded-sm overflow-hidden p-0.5 border border-slate-800">
+                        <div id="staminaBar" class="h-full bg-gradient-to-r from-red-600 via-amber-500 to-emerald-400 rounded-sm transition-all duration-75"></div>
+                    </div>
+                </div>
+
+                <!-- Alert Message -->
+                <div id="statusMessage" class="text-sm font-semibold text-amber-400 bg-slate-950/80 border border-amber-500/30 px-4 py-2 rounded-lg backdrop-blur-md shadow-lg text-right max-w-md">
+                    Harvest ATP fragments to power the Protein Pump exit gate!
+                </div>
+            </div>
+        </div>
+
+        <!-- Start / Game Over / Level Complete Modal Overlay -->
+        <div id="modalOverlay" class="absolute inset-0 bg-black/90 backdrop-blur-xl flex justify-center items-center p-6 z-40">
+            <div class="glass-panel max-w-2xl w-full p-8 rounded-2xl flex flex-col items-center text-center shadow-2xl relative overflow-hidden">
+                <div class="absolute -top-24 -left-24 w-48 h-48 bg-red-600/10 rounded-full blur-3xl pointer-events-none"></div>
+                
+                <h1 id="modalTitle" class="text-3xl font-black font-orbitron text-red-500 tracking-wider mb-2 drop-shadow-[0_0_15px_rgba(239,68,68,0.5)]">
+                    THE GRADIENT: CELLULAR HORROR
+                </h1>
+                
+                <div class="text-xs font-orbitron text-amber-400 uppercase tracking-widest mb-4">
+                    IGCSE BIOLOGY • ACTIVE TRANSPORT SIMULATION
+                </div>
+
+                <div id="modalBody" class="text-sm text-slate-300 leading-relaxed text-left space-y-3 mb-6 max-h-[320px] overflow-y-auto custom-scroll pr-2">
+                    <p>
+                        You are a single <span class="text-cyan-400 font-bold">Glucose Molecule</span> stranded in the gut lumen. The environment outside the epithelial cell has a <span class="text-amber-400 font-bold">LOW concentration</span> of glucose.
+                    </p>
+                    <p>
+                        The natural force of the <span class="text-red-400 font-bold">Concentration Gradient</span> constantly pulls you downwards into the cellular void. Passive diffusion cannot help you move into the blood stream!
+                    </p>
+                    <p>
+                        To pass into the cell against the gradient, you must perform <span class="text-emerald-400 font-bold">Active Transport</span>:
+                    </p>
+                    <ul class="list-disc list-inside space-y-1 text-slate-300 bg-slate-900/80 p-3 rounded-lg border border-slate-800">
+                        <li>Collect <span class="text-amber-400 font-bold">ATP Energy Fragments</span> created via cellular respiration.</li>
+                        <li>Avoid lethal <span class="text-red-400 font-bold">Protease Enzymes & Parasites</span> patrolling the membrane corridors.</li>
+                        <li>Power the <span class="text-emerald-400 font-bold">Protein Pump Gate</span> at the top of the membrane to escape!</li>
+                    </ul>
+                </div>
+
+                <button id="modalActionBtn" class="bg-gradient-to-r from-red-700 via-red-600 to-amber-600 hover:from-red-600 hover:to-amber-500 text-white font-bold font-orbitron text-base px-8 py-3.5 rounded-xl shadow-lg shadow-red-950/80 transform hover:scale-105 active:scale-95 transition-all duration-200 border border-red-400/30">
+                    BEGIN ACTIVE TRANSPORT
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const minimapCanvas = document.getElementById('minimapCanvas');
+        const miniCtx = minimapCanvas.getContext('2d');
+        const jsCanvas = document.getElementById('jumpscareCanvas');
+        const jsCtx = jsCanvas.getContext('2d');
+        const gameViewport = document.getElementById('gameViewport');
+
+        const modalOverlay = document.getElementById('modalOverlay');
+        const modalTitle = document.getElementById('modalTitle');
+        const modalBody = document.getElementById('modalBody');
+        const modalActionBtn = document.getElementById('modalActionBtn');
+
+        const atpDisplay = document.getElementById('atpDisplay');
+        const levelDisplay = document.getElementById('levelDisplay');
+        const gradientDisplay = document.getElementById('gradientDisplay');
+        const statusMessage = document.getElementById('statusMessage');
+        const staminaBar = document.getElementById('staminaBar');
+        const staminaPercent = document.getElementById('staminaPercent');
+
+        // MAP GRID CONFIGURATION (1 = Wall, 0 = Floor, 2 = Exit Protein Pump Gate)
+        const MAP_WIDTH = 16;
+        const MAP_HEIGHT = 16;
+        const MAP = [
+            [1,1,1,1,1,1,1,2,2,1,1,1,1,1,1,1],
+            [1,0,0,0,0,1,0,0,0,0,1,0,0,0,0,1],
+            [1,0,1,1,0,1,0,1,1,0,1,0,1,1,0,1],
+            [1,0,1,0,0,0,0,0,1,0,0,0,0,1,0,1],
+            [1,0,1,0,1,1,1,0,1,1,1,1,0,1,0,1],
+            [1,0,0,0,0,0,1,0,0,0,0,1,0,0,0,1],
+            [1,1,1,0,1,0,1,1,1,0,0,1,0,1,1,1],
+            [1,0,0,0,1,0,0,0,0,0,1,1,0,0,0,1],
+            [1,0,1,1,1,1,1,0,1,0,0,0,0,1,0,1],
+            [1,0,0,0,0,0,1,0,1,1,1,1,0,1,0,1],
+            [1,1,1,0,1,0,0,0,0,0,0,1,0,0,0,1],
+            [1,0,0,0,1,1,1,0,1,1,0,1,1,1,0,1],
+            [1,0,1,0,0,0,0,0,0,1,0,0,0,1,0,1],
+            [1,0,1,1,1,0,1,1,0,1,1,1,0,1,0,1],
+            [1,0,0,0,0,0,0,1,0,0,0,0,0,0,0,1],
+            [1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1]
+        ];
+
+        let isPlaying = false;
+        let gameLoopId = null;
+        let jsLoopId = null;
+        let currentLevel = 1;
+
+        // Player State
+        const player = {
+            x: 8.5, y: 14.5,
+            dirX: 0, dirY: -1,
+            planeX: 0.66, planeY: 0,
+            angle: -Math.PI / 2,
+            walkSpeed: 0.052,
+            sprintSpeed: 0.092,
+            stamina: 100,
+            maxStamina: 100,
+            isSprinting: false
+        };
+
+        // Inputs State
+        const keys = { w: false, a: false, s: false, d: false, Shift: false };
+        let isMouseDown = false;
+        let lastMouseX = 0;
+
+        // Web Audio Synthesizer Engine
+        let audioCtx = null;
+        let droneOsc = null;
+        let droneGain = null;
+        let chaseOsc = null;
+        let chaseGain = null;
+
+        function initAudio() {
+            if (!audioCtx) {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            }
+            if (audioCtx.state === 'suspended') {
+                audioCtx.resume();
+            }
+            setupBackgroundDrone();
+        }
+
+        function setupBackgroundDrone() {
+            if (!audioCtx) return;
+            try {
+                if (droneOsc) droneOsc.stop();
+
+                droneOsc = audioCtx.createOscillator();
+                droneGain = audioCtx.createGain();
+
+                droneOsc.type = 'sawtooth';
+                droneOsc.frequency.setValueAtTime(45 + currentLevel * 5, audioCtx.currentTime);
+
+                const filter = audioCtx.createBiquadFilter();
+                filter.type = 'lowpass';
+                filter.frequency.setValueAtTime(120, audioCtx.currentTime);
+
+                droneGain.gain.setValueAtTime(0.12, audioCtx.currentTime);
+
+                droneOsc.connect(filter);
+                filter.connect(droneGain);
+                droneGain.connect(audioCtx.destination);
+
+                droneOsc.start();
+            } catch(e) {}
+        }
+
+        function playATPPickupSound() {
+            if (!audioCtx) return;
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(523.25, audioCtx.currentTime); // C5
+            osc.frequency.exponentialRampToValueAtTime(1046.50, audioCtx.currentTime + 0.18); // C6
+
+            gain.gain.setValueAtTime(0.25, audioCtx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.2);
+
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            osc.start();
+            osc.stop(audioCtx.currentTime + 0.22);
+        }
+
+        function playHeartbeat() {
+            if (!audioCtx || !isPlaying) return;
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+
+            osc.type = 'sine';
+            osc.frequency.setValueAtTime(65, audioCtx.currentTime);
+            osc.frequency.exponentialRampToValueAtTime(30, audioCtx.currentTime + 0.12);
+
+            gain.gain.setValueAtTime(0.35, audioCtx.currentTime);
+            gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.14);
+
+            osc.connect(gain);
+            gain.connect(audioCtx.destination);
+            osc.start();
+            osc.stop(audioCtx.currentTime + 0.15);
+        }
+
+        function playJumpscareSound() {
+            if (!audioCtx) return;
+
+            // 1. Sawtooth Screech
+            const osc1 = audioCtx.createOscillator();
+            const gain1 = audioCtx.createGain();
+            osc1.type = 'sawtooth';
+            osc1.frequency.setValueAtTime(160, audioCtx.currentTime);
+            osc1.frequency.exponentialRampToValueAtTime(2200, audioCtx.currentTime + 0.1);
+            osc1.frequency.exponentialRampToValueAtTime(90, audioCtx.currentTime + 0.9);
+
+            gain1.gain.setValueAtTime(0.8, audioCtx.currentTime);
+            gain1.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.95);
+
+            // 2. Sub Bass Impact Drop
+            const osc2 = audioCtx.createOscillator();
+            const gain2 = audioCtx.createGain();
+            osc2.type = 'square';
+            osc2.frequency.setValueAtTime(800, audioCtx.currentTime);
+            osc2.frequency.exponentialRampToValueAtTime(25, audioCtx.currentTime + 0.25);
+
+            gain2.gain.setValueAtTime(0.9, audioCtx.currentTime);
+            gain2.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + 0.95);
+
+            osc1.connect(gain1); gain1.connect(audioCtx.destination);
+            osc2.connect(gain2); gain2.connect(audioCtx.destination);
+
+            osc1.start(); osc1.stop(audioCtx.currentTime + 0.95);
+            osc2.start(); osc2.stop(audioCtx.currentTime + 0.95);
+        }
+
+        // Procedural Monster Billboard Sprite Textures
+        const monsterTextures = [];
+        function generateMonsterTextures() {
+            monsterTextures.length = 0;
+
+            for (let type = 0; type < 3; type++) {
+                const mCanvas = document.createElement('canvas');
+                mCanvas.width = 256;
+                mCanvas.height = 256;
+                const mCtx = mCanvas.getContext('2d');
+
+                if (type === 0) {
+                    // TYPE 0: UNHINGED PROTEASE MAW
+                    // Pulsing crimson biomass body
+                    let grad = mCtx.createRadialGradient(128, 128, 20, 128, 128, 105);
+                    grad.addColorStop(0, '#ff1a1a');
+                    grad.addColorStop(0.6, '#990000');
+                    grad.addColorStop(1, '#330000');
+                    mCtx.fillStyle = grad;
+                    mCtx.beginPath();
+                    mCtx.arc(128, 128, 100, 0, Math.PI * 2);
+                    mCtx.fill();
+
+                    // Split Unhinged Razor Jaw
+                    mCtx.fillStyle = '#0a0000';
+                    mCtx.beginPath();
+                    mCtx.ellipse(128, 155, 65, 45, 0, 0, Math.PI * 2);
+                    mCtx.fill();
+
+                    // Teeth
+                    mCtx.fillStyle = '#ffffff';
+                    for (let i = -50; i <= 50; i += 10) {
+                        mCtx.beginPath();
+                        mCtx.moveTo(128 + i, 120);
+                        mCtx.lineTo(128 + i + 4, 142);
+                        mCtx.lineTo(128 + i + 8, 120);
+                        mCtx.fill();
+
+                        mCtx.beginPath();
+                        mCtx.moveTo(128 + i, 190);
+                        mCtx.lineTo(128 + i + 4, 168);
+                        mCtx.lineTo(128 + i + 8, 190);
+                        mCtx.fill();
+                    }
+
+                    // Bloodshot glowing eyes
+                    mCtx.fillStyle = '#ffcc00';
+                    mCtx.beginPath();
+                    mCtx.arc(80, 80, 20, 0, Math.PI * 2);
+                    mCtx.arc(176, 80, 20, 0, Math.PI * 2);
+                    mCtx.fill();
+
+                    mCtx.fillStyle = '#ff0000';
+                    mCtx.fillRect(78, 70, 4, 20);
+                    mCtx.fillRect(174, 70, 4, 20);
+
+                    // Dripping blood droplets
+                    mCtx.fillStyle = '#cc0000';
+                    for(let d=0; d<8; d++) {
+                        let bx = 70 + d * 16;
+                        let by = 190 + (d % 3) * 12;
+                        mCtx.beginPath();
+                        mCtx.arc(bx, by, 5, 0, Math.PI * 2);
+                        mCtx.fill();
+                    }
+                } 
+                else if (type === 1) {
+                    // TYPE 1: LYSED SPECTRAL SKULL
+                    // Ghastly pale cranium
+                    mCtx.fillStyle = '#e2e8f0';
+                    mCtx.beginPath();
+                    mCtx.ellipse(128, 110, 80, 95, 0, 0, Math.PI * 2);
+                    mCtx.fill();
+
+                    // Cracked cranium fissures
+                    mCtx.strokeStyle = '#334155';
+                    mCtx.lineWidth = 3;
+                    mCtx.beginPath();
+                    mCtx.moveTo(128, 20);
+                    mCtx.lineTo(110, 60);
+                    mCtx.lineTo(135, 90);
+                    mCtx.stroke();
+
+                    // Hollow dark sockets with Cyan Flame
+                    mCtx.fillStyle = '#050b14';
+                    mCtx.beginPath();
+                    mCtx.ellipse(88, 100, 26, 32, -0.2, 0, Math.PI * 2);
+                    mCtx.ellipse(168, 100, 26, 32, 0.2, 0, Math.PI * 2);
+                    mCtx.fill();
+
+                    // Glowing Cyan Eye Flames
+                    mCtx.fillStyle = '#00ffff';
+                    mCtx.beginPath();
+                    mCtx.arc(88, 100, 9, 0, Math.PI * 2);
+                    mCtx.arc(168, 100, 9, 0, Math.PI * 2);
+                    mCtx.fill();
+
+                    // Nasal void & Jaw teeth
+                    mCtx.fillStyle = '#0f172a';
+                    mCtx.beginPath();
+                    mCtx.moveTo(128, 125); mCtx.lineTo(120, 145); mCtx.lineTo(136, 145);
+                    mCtx.closePath(); mCtx.fill();
+
+                    mCtx.fillRect(98, 170, 60, 25);
+                    mCtx.fillStyle = '#ffffff';
+                    for(let t=102; t<155; t+=10) {
+                        mCtx.fillRect(t, 170, 6, 12);
+                        mCtx.fillRect(t, 183, 6, 12);
+                    }
+                } 
+                else {
+                    // TYPE 2: APOPTOSIS PARASITE
+                    // Toxic green cell cluster
+                    let pGrad = mCtx.createRadialGradient(128, 128, 10, 128, 128, 100);
+                    pGrad.addColorStop(0, '#4ade80');
+                    pGrad.addColorStop(0.5, '#16a34a');
+                    pGrad.addColorStop(1, '#052e16');
+                    mCtx.fillStyle = pGrad;
+                    mCtx.beginPath();
+                    mCtx.arc(128, 128, 90, 0, Math.PI * 2);
+                    mCtx.fill();
+
+                    // Slit Pupil Yellow Eyes scattered
+                    const eyePos = [
+                        {x: 90, y: 90}, {x: 165, y: 95}, {x: 128, y: 145},
+                        {x: 128, y: 75}, {x: 80, y: 140}, {x: 175, y: 145}
+                    ];
+                    eyePos.forEach(p => {
+                        mCtx.fillStyle = '#facc15';
+                        mCtx.beginPath();
+                        mCtx.arc(p.x, p.y, 14, 0, Math.PI * 2);
+                        mCtx.fill();
+
+                        mCtx.fillStyle = '#000000';
+                        mCtx.fillRect(p.x - 2, p.y - 10, 4, 20);
+                    });
+
+                    // Cilia Tentacles
+                    mCtx.strokeStyle = '#22c55e';
+                    mCtx.lineWidth = 4;
+                    for (let a = 0; a < Math.PI * 2; a += 0.35) {
+                        let sx = 128 + Math.cos(a) * 88;
+                        let sy = 128 + Math.sin(a) * 88;
+                        let ex = 128 + Math.cos(a) * 115;
+                        let ey = 128 + Math.sin(a) * 115;
+                        mCtx.beginPath();
+                        mCtx.moveTo(sx, sy);
+                        mCtx.lineTo(ex, ey);
+                        mCtx.stroke();
+                    }
+                }
+
+                monsterTextures.push(mCanvas);
+            }
+        }
+        generateMonsterTextures();
+
+        // Level & Entities Setup
+        let requiredATP = 3;
+        let atpCollected = 0;
+        let atps = [];
+        let enemies = [];
+        let gradientPullForce = 0.008;
+
+        // Guaranteed Floor-Tile ATP Spawning
+        function spawnATP() {
+            atps = [];
+            const validTiles = [];
+            for (let r = 1; r < MAP_HEIGHT - 1; r++) {
+                for (let c = 1; c < MAP_WIDTH - 1; c++) {
+                    // Only floor tiles, avoiding spawn origin area
+                    if (MAP[r][c] === 0 && !(r > 12 && c > 6 && c < 10)) {
+                        validTiles.push({ x: c + 0.5, y: r + 0.5 });
+                    }
+                }
+            }
+
+            for (let i = 0; i < requiredATP; i++) {
+                if (validTiles.length > 0) {
+                    let idx = Math.floor(Math.random() * validTiles.length);
+                    let tile = validTiles.splice(idx, 1)[0];
+                    atps.push({ x: tile.x, y: tile.y, collected: false });
+                }
+            }
+        }
+
+        function setupLevel() {
+            levelDisplay.innerText = currentLevel;
+            requiredATP = 2 + currentLevel;
+            atpCollected = 0;
+            gradientPullForce = 0.006 + (currentLevel * 0.0025);
+
+            gradientDisplay.innerText = `Downwards (${gradientPullForce.toFixed(4)})`;
+
+            player.x = 8.5; 
+            player.y = 14.5;
+            player.angle = -Math.PI / 2;
+            rotatePlayer(0);
+            player.stamina = 100;
+
+            atpDisplay.innerText = `${atpCollected} / ${requiredATP}`;
+            statusMessage.innerText = `Sector ${currentLevel}: Harvest ${requiredATP} ATP fragments to power exit pump!`;
+            statusMessage.className = "text-sm font-semibold text-amber-400 bg-slate-950/80 border border-amber-500/30 px-4 py-2 rounded-lg backdrop-blur-md shadow-lg text-right max-w-md";
+
+            spawnATP();
+
+            // Spawn Enemies with Anti-Camping Properties
+            const count = 2 + currentLevel;
+            enemies = [];
+            for (let i = 0; i < count; i++) {
+                enemies.push({
+                    x: 2 + Math.random() * 12,
+                    y: 2 + Math.random() * 7,
+                    type: i % 3,
+                    speed: 0.038 + (currentLevel * 0.002), // Balanced speed (slower than player walk)
+                    isChasing: false,
+                    targetX: 8.5,
+                    targetY: 8.5,
+                    antiCampTimer: 0
+                });
+            }
+        }
+
+        // Event Listeners for Controls (WASD, Trackpad, Mouse Drag & Pointer Lock)
+        window.addEventListener('keydown', (e) => {
+            if (e.key === 'w' || e.key === 'W') keys.w = true;
+            if (e.key === 's' || e.key === 'S') keys.s = true;
+            if (e.key === 'a' || e.key === 'A') keys.a = true;
+            if (e.key === 'd' || e.key === 'D') keys.d = true;
+            if (e.key === 'Shift') keys.Shift = true;
+        });
+
+        window.addEventListener('keyup', (e) => {
+            if (e.key === 'w' || e.key === 'W') keys.w = false;
+            if (e.key === 's' || e.key === 'S') keys.s = false;
+            if (e.key === 'a' || e.key === 'A') keys.a = false;
+            if (e.key === 'd' || e.key === 'D') keys.d = false;
+            if (e.key === 'Shift') keys.Shift = false;
+        });
+
+        // Trackpad Horizontal Wheel Swiping
+        window.addEventListener('wheel', (e) => {
+            if (!isPlaying) return;
+            if (Math.abs(e.deltaX) > 2) {
+                rotatePlayer(e.deltaX * 0.0035);
+            }
+        }, { passive: true });
+
+        // Click & Drag / Pointer Lock
+        gameViewport.addEventListener('mousedown', (e) => {
+            if (!isPlaying) return;
+            isMouseDown = true;
+            lastMouseX = e.clientX;
+            if (gameViewport.requestPointerLock) {
+                gameViewport.requestPointerLock();
+            }
+        });
+
+        window.addEventListener('mouseup', () => isMouseDown = false);
+
+        window.addEventListener('mousemove', (e) => {
+            if (!isPlaying) return;
+            if (document.pointerLockElement === gameViewport) {
+                rotatePlayer(e.movementX * 0.0035);
+            } else if (isMouseDown) {
+                let deltaX = e.clientX - lastMouseX;
+                rotatePlayer(deltaX * 0.0042);
+                lastMouseX = e.clientX;
+            }
+        });
+
+        function rotatePlayer(amount) {
+            player.angle += amount;
+            player.dirX = Math.cos(player.angle);
+            player.dirY = Math.sin(player.angle);
+            player.planeX = -player.dirY * 0.66;
+            player.planeY = player.dirX * 0.66;
+        }
+
+        // Main Game Loop Update
+        let heartbeatTimer = 0;
+
+        function update() {
+            if (!isPlaying) return;
+
+            // Heartbeat audio triggers based on nearest monster proximity
+            heartbeatTimer += 0.016;
+            let closestDist = 999;
+            enemies.forEach(e => {
+                let d = Math.hypot(player.x - e.x, player.y - e.y);
+                if (d < closestDist) closestDist = d;
+            });
+
+            let hbInterval = closestDist < 3.0 ? 0.35 : (closestDist < 6.0 ? 0.65 : 1.2);
+            if (heartbeatTimer >= hbInterval) {
+                playHeartbeat();
+                heartbeatTimer = 0;
+            }
+
+            // Sprinting & Stamina Engine
+            player.isSprinting = keys.Shift && player.stamina > 5 && (keys.w || keys.s || keys.a || keys.d);
+            let currentSpeed = player.isSprinting ? player.sprintSpeed : player.walkSpeed;
+
+            if (player.isSprinting) {
+                player.stamina = Math.max(0, player.stamina - 1.1);
+            } else {
+                player.stamina = Math.min(player.maxStamina, player.stamina + 0.35);
+            }
+            
+            staminaBar.style.width = `${player.stamina}%`;
+            staminaPercent.innerText = `${Math.round(player.stamina)}%`;
+
+            // Movement Physics
+            let moveX = 0;
+            let moveY = 0;
+            if (keys.w) { moveX += player.dirX * currentSpeed; moveY += player.dirY * currentSpeed; }
+            if (keys.s) { moveX -= player.dirX * currentSpeed; moveY -= player.dirY * currentSpeed; }
+            if (keys.a) { moveX += player.dirY * currentSpeed; moveY -= player.dirX * currentSpeed; }
+            if (keys.d) { moveX -= player.dirY * currentSpeed; moveY += player.dirX * currentSpeed; }
+
+            // Apply Biological Concentration Gradient Pull (Downwards direction force)
+            moveY += gradientPullForce;
+
+            // Circle-Buffer Wall-Sliding Collision Physics
+            let newX = player.x + moveX;
+            let newY = player.y + moveY;
+            const radius = 0.22;
+
+            if (
+                MAP[Math.floor(player.y)][Math.floor(newX - radius)] === 0 &&
+                MAP[Math.floor(player.y)][Math.floor(newX + radius)] === 0
+            ) {
+                player.x = newX;
+            }
+
+            if (
+                MAP[Math.floor(newY - radius)][Math.floor(player.x)] === 0 &&
+                MAP[Math.floor(newY + radius)][Math.floor(player.x)] === 0
+            ) {
+                player.y = newY;
+            }
+
+            // Check ATP Collection
+            atps.forEach(atp => {
+                if (!atp.collected) {
+                    let dist = Math.hypot(player.x - atp.x, player.y - atp.y);
+                    if (dist < 0.5) {
+                        atp.collected = true;
+                        atpCollected++;
+                        playATPPickupSound();
+                        atpDisplay.innerText = `${atpCollected} / ${requiredATP}`;
+
+                        if (atpCollected >= requiredATP) {
+                            statusMessage.innerText = "PUMP ACTIVATED! Head to the green beacon exit gate at top!";
+                            statusMessage.className = "text-sm font-bold text-emerald-400 bg-slate-950/80 border border-emerald-500/50 px-4 py-2 rounded-lg backdrop-blur-md shadow-lg text-right max-w-md pulse-beacon";
+                        }
+                    }
+                }
+            });
+
+            // Protein Pump Gate Exit Trigger
+            if (player.y < 1.8 && player.x > 7.0 && player.x < 9.0) {
+                if (atpCollected >= requiredATP) {
+                    triggerLevelPassed();
+                    return;
+                } else {
+                    player.y += 0.25; // Repel back if locked
+                    statusMessage.innerText = "PROTEIN PUMP LOCKED! Collect all required ATP energy first!";
+                    statusMessage.className = "text-sm font-bold text-red-400 bg-slate-950/80 border border-red-500/50 px-4 py-2 rounded-lg backdrop-blur-md shadow-lg text-right max-w-md";
+                }
+            }
+
+            // Monster AI & Anti-Camping Engine
+            enemies.forEach(e => {
+                let distToPlayer = Math.hypot(player.x - e.x, player.y - e.y);
+
+                // Line-of-sight / proximity alert
+                if (distToPlayer < 5.8) {
+                    e.isChasing = true;
+                }
+
+                if (e.isChasing) {
+                    let angle = Math.atan2(player.y - e.y, player.x - e.x);
+                    let nx = e.x + Math.cos(angle) * e.speed;
+                    let ny = e.y + Math.sin(angle) * e.speed;
+
+                    // Basic wall sliding for monsters
+                    if (MAP[Math.floor(e.y)][Math.floor(nx)] === 0) e.x = nx;
+                    if (MAP[Math.floor(ny)][Math.floor(e.x)] === 0) e.y = ny;
+                } else {
+                    // Aggressive Anti-Camping Route Logic
+                    e.antiCampTimer += 0.016;
+
+                    // Check if monster is camping near active uncollected ATP or Exit Gate
+                    let nearATP = atps.some(a => !a.collected && Math.hypot(a.x - e.x, a.y - e.y) < 3.0);
+                    let nearExit = Math.hypot(8.0 - e.x, 1.0 - e.y) < 3.0;
+
+                    let distToTarget = Math.hypot(e.targetX - e.x, e.targetY - e.y);
+
+                    if (distToTarget < 0.6 || e.antiCampTimer > 3.0 || nearATP || nearExit) {
+                        // Anti-camping re-route: Force pick a floor tile far away on opposite map side
+                        e.targetX = Math.random() > 0.5 ? (Math.random() * 5 + 2) : (Math.random() * 5 + 9);
+                        e.targetY = Math.random() > 0.5 ? (Math.random() * 4 + 2) : (Math.random() * 4 + 10);
+                        e.antiCampTimer = 0;
+                    }
+
+                    let angle = Math.atan2(e.targetY - e.y, e.targetX - e.x);
+                    e.x += Math.cos(angle) * (e.speed * 0.65);
+                    e.y += Math.sin(angle) * (e.speed * 0.65);
+                }
+
+                // Capture Check
+                if (distToPlayer < 0.45) {
+                    triggerJumpscare(e.type);
+                }
+            });
+
+            // RENDER 3D RAYCASTING WORLD
+            render3D();
+
+            // RENDER RADAR MINIMAP
+            renderMinimap();
+
+            if (isPlaying) {
+                gameLoopId = requestAnimationFrame(update);
+            }
+        }
+
+        // 3D Raycasting Engine
+        function render3D() {
+            // Dark Ceiling & Dark Bio-Slate Floor
+            ctx.fillStyle = '#05070d';
+            ctx.fillRect(0, 0, canvas.width, canvas.height / 2);
+
+            ctx.fillStyle = '#0b101d';
+            ctx.fillRect(0, canvas.height / 2, canvas.width, canvas.height / 2);
+
+            const zBuffer = new Array(canvas.width);
+
+            for (let x = 0; x < canvas.width; x++) {
+                let cameraX = 2 * x / canvas.width - 1;
+                let rayDirX = player.dirX + player.planeX * cameraX;
+                let rayDirY = player.dirY + player.planeY * cameraX;
+
+                let mapX = Math.floor(player.x);
+                let mapY = Math.floor(player.y);
+
+                let deltaDistX = Math.abs(1 / rayDirX);
+                let deltaDistY = Math.abs(1 / rayDirY);
+
+                let stepX, stepY, sideDistX, sideDistY;
+                let hit = 0, side = 0;
+
+                if (rayDirX < 0) { stepX = -1; sideDistX = (player.x - mapX) * deltaDistX; }
+                else { stepX = 1; sideDistX = (mapX + 1.0 - player.x) * deltaDistX; }
+
+                if (rayDirY < 0) { stepY = -1; sideDistY = (player.y - mapY) * deltaDistY; }
+                else { stepY = 1; sideDistY = (mapY + 1.0 - player.y) * deltaDistY; }
+
+                while (hit === 0) {
+                    if (sideDistX < sideDistY) { sideDistX += deltaDistX; mapX += stepX; side = 0; }
+                    else { sideDistY += deltaDistY; mapY += stepY; side = 1; }
+                    if (MAP[mapY][mapX] > 0) hit = 1;
+                }
+
+                let perpWallDist = side === 0 ? (mapX - player.x + (1 - stepX) / 2) / rayDirX : (mapY - player.y + (1 - stepY) / 2) / rayDirY;
+                zBuffer[x] = perpWallDist;
+
+                let lineHeight = Math.floor(canvas.height / perpWallDist);
+                let drawStart = -lineHeight / 2 + canvas.height / 2;
+                let drawEnd = lineHeight / 2 + canvas.height / 2;
+
+                // Wall Shading & Colors (#1a2332 / #222d40)
+                let isGate = MAP[mapY][mapX] === 2;
+                let baseColor;
+
+                if (isGate) {
+                    baseColor = (atpCollected >= requiredATP) ? '#00ff66' : '#990000';
+                } else {
+                    baseColor = (side === 1) ? '#1a2332' : '#222d40';
+                }
+
+                ctx.fillStyle = baseColor;
+                ctx.fillRect(x, drawStart, 1, drawEnd - drawStart);
+
+                // Extended Distance Fog Darkness Shading
+                let fogFactor = Math.min(1.0, perpWallDist / 9.0);
+                ctx.fillStyle = `rgba(3, 2, 6, ${fogFactor})`;
+                ctx.fillRect(x, drawStart, 1, drawEnd - drawStart);
+            }
+
+            // Render Billboard Sprites (Monsters & Floating Golden ATP Stars)
+            const sprites = [];
+            atps.forEach(a => { if (!a.collected) sprites.push({ x: a.x, y: a.y, type: 'atp' }); });
+            enemies.forEach(e => { sprites.push({ x: e.x, y: e.y, type: 'enemy', enemyType: e.type }); });
+
+            sprites.sort((a, b) => Math.hypot(player.x - b.x, player.y - b.y) - Math.hypot(player.x - a.x, player.y - a.y));
+
+            sprites.forEach(s => {
+                let spriteX = s.x - player.x;
+                let spriteY = s.y - player.y;
+
+                let invDet = 1.0 / (player.planeX * player.dirY - player.dirX * player.planeY);
+                let transformX = invDet * (player.dirY * spriteX - player.dirX * spriteY);
+                let transformY = invDet * (-player.planeY * spriteX + player.planeX * spriteY);
+
+                if (transformY > 0.1) {
+                    let spriteScreenX = Math.floor((canvas.width / 2) * (1 + transformX / transformY));
+                    let spriteHeight = Math.abs(Math.floor(canvas.height / transformY));
+                    let drawStartY = -spriteHeight / 2 + canvas.height / 2;
+
+                    if (s.type === 'enemy') {
+                        let spriteWidth = spriteHeight;
+                        let drawStartX = spriteScreenX - spriteWidth / 2;
+
+                        if (drawStartX < canvas.width && drawStartX + spriteWidth > 0) {
+                            if (transformY < zBuffer[Math.floor(spriteScreenX)]) {
+                                ctx.drawImage(monsterTextures[s.enemyType], drawStartX, drawStartY, spriteWidth, spriteHeight);
+                            }
+                        }
+                    } else {
+                        // Render Floating ATP Energy Fragment
+                        if (transformY < zBuffer[Math.floor(spriteScreenX)]) {
+                            let size = Math.max(4, 28 / transformY);
+                            let py = canvas.height / 2 + (20 / transformY);
+
+                            ctx.fillStyle = '#ffd700';
+                            ctx.beginPath();
+                            ctx.arc(spriteScreenX, py, size, 0, Math.PI * 2);
+                            ctx.fill();
+
+                            ctx.strokeStyle = '#ffffff';
+                            ctx.lineWidth = 2;
+                            ctx.stroke();
+                        }
+                    }
+                }
+            });
+        }
+
+        // Radar Minimap Engine
+        function renderMinimap() {
+            miniCtx.fillStyle = '#060913';
+            miniCtx.fillRect(0, 0, minimapCanvas.width, minimapCanvas.height);
+
+            const scale = minimapCanvas.width / MAP_WIDTH;
+
+            // Draw Walls
+            for (let r = 0; r < MAP_HEIGHT; r++) {
+                for (let c = 0; c < MAP_WIDTH; c++) {
+                    if (MAP[r][c] === 1) {
+                        miniCtx.fillStyle = '#1e293b';
+                        miniCtx.fillRect(c * scale, r * scale, scale, scale);
+                    } else if (MAP[r][c] === 2) {
+                        miniCtx.fillStyle = atpCollected >= requiredATP ? '#00ff66' : '#990000';
+                        miniCtx.fillRect(c * scale, r * scale, scale, scale);
+                    }
+                }
+            }
+
+            // Draw ATP Shimmering Gold Stars (#ffd700)
+            atps.forEach(a => {
+                if (!a.collected) {
+                    miniCtx.fillStyle = '#ffd700';
+                    miniCtx.beginPath();
+                    miniCtx.arc(a.x * scale, a.y * scale, 3.5, 0, Math.PI * 2);
+                    miniCtx.fill();
+                }
+            });
+
+            // Exit Gate Pulsing Emerald Beacon (#00ff66)
+            if (atpCollected >= requiredATP) {
+                let pulse = (Math.sin(Date.now() * 0.012) + 1) * 7 + 4;
+                miniCtx.strokeStyle = '#00ff66';
+                miniCtx.lineWidth = 2;
+                miniCtx.beginPath();
+                miniCtx.arc(8.0 * scale, 0.8 * scale, pulse, 0, Math.PI * 2);
+                miniCtx.stroke();
+            }
+
+            // Draw Patrol / Chase Monsters
+            enemies.forEach(e => {
+                miniCtx.fillStyle = e.isChasing ? '#ff0033' : '#a855f7';
+                miniCtx.beginPath();
+                miniCtx.arc(e.x * scale, e.y * scale, 3.5, 0, Math.PI * 2);
+                miniCtx.fill();
+            });
+
+            // Draw Player & Cyan FOV Cone
+            let px = player.x * scale;
+            let py = player.y * scale;
+
+            miniCtx.fillStyle = 'rgba(0, 255, 255, 0.35)';
+            miniCtx.beginPath();
+            miniCtx.moveTo(px, py);
+            miniCtx.arc(px, py, 22, player.angle - 0.45, player.angle + 0.45);
+            miniCtx.closePath();
+            miniCtx.fill();
+
+            miniCtx.fillStyle = '#00ffff';
+            miniCtx.beginPath();
+            miniCtx.arc(px, py, 3.5, 0, Math.PI * 2);
+            miniCtx.fill();
+        }
+
+        // Terrifying Jumpscare Sequence
+        function triggerJumpscare(monsterType) {
+            isPlaying = false;
+            if (gameLoopId) cancelAnimationFrame(gameLoopId);
+
+            jsCanvas.classList.remove('hidden');
+            playJumpscareSound();
+
+            let startTime = Date.now();
+
+            function renderJumpscareFrame() {
+                let elapsed = Date.now() - startTime;
+                if (elapsed > 1100) {
+                    jsCanvas.classList.add('hidden');
+                    showGameOverModal();
+                    return;
+                }
+
+                let progress = elapsed / 1100;
+                let scale = 1.0 + progress * 4.5;
+                let shakeX = (Math.random() - 0.5) * 60;
+                let shakeY = (Math.random() - 0.5) * 60;
+
+                jsCtx.fillStyle = Math.random() > 0.3 ? '#000000' : '#450000';
+                jsCtx.fillRect(0, 0, jsCanvas.width, jsCanvas.height);
+
+                jsCtx.save();
+                jsCtx.translate(500 + shakeX, 350 + shakeY);
+                jsCtx.scale(scale, scale);
+                jsCtx.drawImage(monsterTextures[monsterType], -128, -128);
+                jsCtx.restore();
+
+                // Blood Splatter Overlays
+                jsCtx.fillStyle = 'rgba(180, 0, 0, 0.75)';
+                for (let i = 0; i < 25; i++) {
+                    jsCtx.beginPath();
+                    jsCtx.arc((Math.sin(i * 9) * 500) + 500, (Math.cos(i * 4) * 350) + 350, Math.random() * 30 + 8, 0, Math.PI * 2);
+                    jsCtx.fill();
+                }
+
+                jsCtx.fillStyle = '#ff0000';
+                jsCtx.font = '900 60px Orbitron';
+                jsCtx.textAlign = 'center';
+                jsCtx.fillText("MOLECULE DENATURED", 500 + shakeX, 600 + shakeY);
+
+                jsLoopId = requestAnimationFrame(renderJumpscareFrame);
+            }
+
+            jsLoopId = requestAnimationFrame(renderJumpscareFrame);
+        }
+
+        // Educational Modals
+        function triggerLevelPassed() {
+            isPlaying = false;
+            if (gameLoopId) cancelAnimationFrame(gameLoopId);
+
+            currentLevel++;
+
+            modalTitle.innerText = `SECTOR ${currentLevel - 1} CLEARED!`;
+            modalTitle.className = "text-3xl font-black font-orbitron text-emerald-400 tracking-wider mb-2 drop-shadow-[0_0_15px_rgba(52,211,153,0.5)]";
+
+            modalBody.innerHTML = `
+                <div class="bg-emerald-950/40 border border-emerald-500/30 p-4 rounded-xl mb-3">
+                    <h3 class="text-emerald-400 font-bold text-base mb-1 font-orbitron">IGCSE BIOLOGY KEY CONCEPT:</h3>
+                    <p class="text-sm text-emerald-100">
+                        Active Transport successful! You forced glucose against the concentration gradient through the epithelial membrane into the bloodstream.
+                    </p>
+                </div>
+                <p><strong>Core Biological Principles Learned:</strong></p>
+                <ul class="list-disc list-inside space-y-1.5 text-slate-300">
+                    <li><span class="text-amber-400 font-bold">ATP Energy Requirement:</span> Unlike passive diffusion, active transport requires metabolic energy released during cellular respiration.</li>
+                    <li><span class="text-emerald-400 font-bold">Protein Pump Action:</span> Special embedded transmembrane <span class="text-cyan-400 font-bold">Protein Pumps</span> change shape to move specific molecules against their gradient.</li>
+                    <li><span class="text-red-400 font-bold">Enzyme Denaturation Threat:</span> Extreme conditions or digestive proteases can alter protein active sites, preventing molecular transport.</li>
+                </ul>
+            `;
+
+            modalActionBtn.innerText = `PROCEED TO SECTOR ${currentLevel}`;
+            modalActionBtn.onclick = startLevel;
+            modalOverlay.classList.remove('hidden');
+        }
+
+        function showGameOverModal() {
+            modalTitle.innerText = "TRANSPORT FAILED: DENATURED";
+            modalTitle.className = "text-3xl font-black font-orbitron text-red-500 tracking-wider mb-2 drop-shadow-[0_0_15px_rgba(239,68,68,0.5)]";
+
+            modalBody.innerHTML = `
+                <div class="bg-red-950/40 border border-red-500/30 p-4 rounded-xl mb-3">
+                    <h3 class="text-red-400 font-bold text-base mb-1 font-orbitron">BIOLOGICAL FAILURE REASON:</h3>
+                    <p class="text-sm text-red-100">
+                        You ran out of ATP or were intercepted by digestive enzymes, causing molecular breakdown!
+                    </p>
+                </div>
+                <p><strong>IGCSE Biology Revision Point:</strong></p>
+                <p class="text-slate-300 leading-relaxed">
+                    Moving substances from a region of <span class="text-amber-400 font-bold">LOW concentration to HIGH concentration</span> cannot occur passively. Without continuous ATP supply to power <span class="text-cyan-400 font-bold">Protein Pumps</span>, cellular uptake halts!
+                </p>
+            `;
+
+            modalActionBtn.innerText = `RETRY SECTOR ${currentLevel}`;
+            modalActionBtn.onclick = startLevel;
+            modalOverlay.classList.remove('hidden');
+        }
+
+        function startLevel() {
+            initAudio();
+            setupLevel();
+            modalOverlay.classList.add('hidden');
+            isPlaying = true;
+            gameLoopId = requestAnimationFrame(update);
+        }
+
+        modalActionBtn.onclick = startLevel;
+    </script>
+</body>
+</html>
